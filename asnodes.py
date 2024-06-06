@@ -7,6 +7,40 @@ import comfy.model_management
 
 MAX_RESOLUTION = 8192
 
+#SVD from size Image
+class Den_SVD_img2vid:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "clip_vision": ("CLIP_VISION",),
+                              "init_image": ("IMAGE",),
+                              "vae": ("VAE",),
+                              "video_frames": ("INT", {"default": 14, "min": 1, "max": 4096}),
+                              "motion_bucket_id": ("INT", {"default": 127, "min": 1, "max": 1023}),
+                              "fps": ("INT", {"default": 6, "min": 1, "max": 1024}),
+                              "augmentation_level": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.01})
+                             }}
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "LATENT")
+    RETURN_NAMES = ("positive", "negative", "latent")
+
+    FUNCTION = "encode"
+
+    CATEGORY = "conditioning/video_models"
+
+    def encode(self, clip_vision, init_image, vae, video_frames, motion_bucket_id, fps, augmentation_level):
+        height = init_image.shape[1]
+        width = init_image.shape[2]
+        output = clip_vision.encode_image(init_image)
+        pooled = output.image_embeds.unsqueeze(0)
+        pixels = comfy.utils.common_upscale(init_image.movedim(-1,1), width, height, "bilinear", "center").movedim(1,-1)
+        encode_pixels = pixels[:,:,:,:3]
+        if augmentation_level > 0:
+            encode_pixels += torch.randn_like(pixels) * augmentation_level
+        t = vae.encode(encode_pixels)
+        positive = [[pooled, {"motion_bucket_id": motion_bucket_id, "fps": fps, "augmentation_level": augmentation_level, "concat_latent_image": t}]]
+        negative = [[torch.zeros_like(pooled), {"motion_bucket_id": motion_bucket_id, "fps": fps, "augmentation_level": augmentation_level, "concat_latent_image": torch.zeros_like(t)}]]
+        latent = torch.zeros([video_frames, 4, height // 8, width // 8])
+        return (positive, negative, {"samples":latent})
+
 #Latent space from size Image
 class Den_ImageToLatentSpace:
     @classmethod
@@ -519,6 +553,7 @@ class Den_NoiseImage_AS:
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
 NODE_CLASS_MAPPINGS = {
+    "Den_SVD_img2vid": Den_SVD_img2vid,
     "Den_ImageToLatentSpace": Den_ImageToLatentSpace,
     "Den_MaskToImage_AS": Den_MaskToImage_AS,
     "Den_ImageToMask_AS": Den_ImageToMask_AS,
