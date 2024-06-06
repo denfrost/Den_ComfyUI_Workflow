@@ -12,3 +12,7 @@ Manipulation of Latent Space, Automatic pipeline with a bit efforts.
 ![](d88f68c317f3f790055be5978e2689dc.png)
 --------------
 ![ComfyUI Screenshot](e92381a5d7c26f138d1451c8b4f52142.jpg)
+
+--------------
+How Install. Manager->Install via Git URL -> Enter Git Address 
+![ComfyUI Screenshot](88ab9b2c48fb20688935a1bf8ea4b44e.png)
