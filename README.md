@@ -9,7 +9,7 @@ https://huggingface.co/models?library=gguf&sort=trending&search=llava
 #### GPT load: `Den_GPTLoaderSimple_llama`
 - Load Model and Clip for LLM
 
-
+![](18d83b489b44ea98d3ac277a53036568.png)
 
 #### GPT Sampler: `Den_GPTSampler_llama`
 - Sampler Llama with using Cache for Acceleration
