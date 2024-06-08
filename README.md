@@ -6,8 +6,12 @@ Manipulation of Latent Space, Automatic pipeline with a bit efforts.
 --------------
 #### Using GPT & LLM models : Llava,GGUF
 https://huggingface.co/models?library=gguf&sort=trending&search=llava
+#### GPT load: `Den_GPTLoaderSimple_llama`
+- Load Model and Clip for LLM
 
-#### GPT: `Den_GPTSampler_llama`
+
+
+#### GPT Sampler: `Den_GPTSampler_llama`
 - Sampler Llama with using Cache for Acceleration
 
 ![](ba951e180cc4c9304541abe2843c28ce.png)

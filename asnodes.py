@@ -2,14 +2,108 @@ import torch
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import sys, os
-#Latent
-import comfy.model_management #CUDA detect
-#LLM
+# Latent
+import comfy.model_management  # CUDA detect
+# LLM
+from llama_cpp import Llama
+from llama_cpp.llama_chat_format import Llava15ChatHandler
+import folder_paths
 from io import BytesIO
 import base64
 
 MAX_RESOLUTION = 8192
-#LLM Special Load
+
+# LLM Special Load
+models_base_path = os.path.join(folder_paths.models_dir, "GPTcheckpoints")
+_folders_whitelist = ["moondream", "joytag"]  # ,"internlm"]
+
+
+def get_model_list(models_base_path, supported_gpt_extensions):
+    all_models = []
+    try:
+        for file in os.listdir(models_base_path):
+
+            if os.path.isdir(os.path.join(models_base_path, file)):
+                if file in _folders_whitelist:
+                    all_models.append(os.path.join(models_base_path, file))
+
+            else:
+                if file.endswith(tuple(supported_gpt_extensions)):
+                    all_models.append(os.path.join(models_base_path, file))
+    except:
+        print(f"Path {models_base_path} not valid.")
+    return all_models
+
+
+def get_model_path(folder_list, model_name):
+    for folder_path in folder_list:
+        if folder_path.endswith(model_name):
+            return folder_path
+
+
+supported_gpt_extensions = set(['.gguf'])
+supported_clip_extensions = set(['.gguf', '.bin'])
+model_external_path = None
+all_models = []
+try:
+    model_external_path = folder_paths.folder_names_and_paths["GPTcheckpoints"][0][0]
+except:
+    # no external folder
+    pass
+
+all_llava_models = get_model_list(os.path.join(folder_paths.models_dir, "GPTcheckpoints", "llava", "models"),
+                                  supported_gpt_extensions)
+all_llava_clips = get_model_list(os.path.join(folder_paths.models_dir, "GPTcheckpoints", "llava", "clips"),
+                                 supported_clip_extensions)
+
+all_models = get_model_list(models_base_path, supported_gpt_extensions)
+if model_external_path is not None:
+    all_models += get_model_list(model_external_path, supported_gpt_extensions)
+all_models += all_llava_models
+# extract only names
+all_models_names = [os.path.basename(model) for model in all_models]
+
+all_clips_names = [os.path.basename(model) for model in all_llava_clips]
+
+
+class Den_GPTLoaderSimple_llama:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+            {
+                "ckpt_name": (all_models_names,),
+                "clip_name": (all_clips_names,),
+                "gpu_layers": ("INT", {"default": 27, "min": 0, "max": 100, "step": 1}),
+                "n_threads": ("INT", {"default": 8, "min": 1, "max": 100, "step": 1}),
+                "max_ctx": ("INT", {"default": 2048, "min": 300, "max": 100000, "step": 4}),
+            },
+        }
+
+    RETURN_TYPES = ("CUSTOM",)
+    RETURN_NAMES = ("model",)
+    FUNCTION = "load_gpt_checkpoint"
+
+    CATEGORY = "LLM"
+
+    def load_gpt_checkpoint(self, ckpt_name, clip_name, gpu_layers, n_threads, max_ctx, llava_clip=None):
+        ckpt_path = get_model_path(all_models, ckpt_name)
+        llm = None
+        clip_path = get_model_path(all_llava_clips, clip_name)
+        llava_clip = Llava15ChatHandler(clip_model_path=clip_path, verbose=False)
+        # if is path
+        if os.path.isfile(ckpt_path):
+            print("GPT MODEL DETECTED")
+            if "llava" in ckpt_path:
+                if llava_clip is None:
+                    raise ValueError("Please provide a llava clip")
+                llm = Llama(model_path=ckpt_path, n_gpu_layers=gpu_layers, verbose=False, n_threads=n_threads,
+                            n_ctx=max_ctx, logits_all=True, chat_handler=llava_clip)
+            else:
+                llm = Llama(model_path=ckpt_path, n_gpu_layers=gpu_layers, verbose=False, n_threads=n_threads,
+                            n_ctx=max_ctx)
+        return ([llm, ckpt_name, ckpt_path],)
+
+
 class Den_GPTSampler_llama:
     """
     A custom node by Den for text generation using GPT
@@ -34,6 +128,7 @@ class Den_GPTSampler_llama:
     def __init__(self):
         self.temp_prompt = ""
         pass
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -67,7 +162,7 @@ class Den_GPTSampler_llama:
     RETURN_TYPES = ("STRING",)
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "generate_text"
-    CATEGORY = "N-Suite/Sampling"
+    CATEGORY = "LLM"
 
     def generate_text(self, max_tokens, temperature, top_p, logprobs, echo, stop_token, frequency_penalty,
                       presence_penalty, repeat_penalty, top_k, tfs_z, model, print_output, cached, prefix, suffix,
@@ -80,7 +175,7 @@ class Den_GPTSampler_llama:
             if "llava" in model_path:
                 print(f"Den Used Llama Model!: {prompt}\n")
                 cont = llava_inference(model_funct, prompt, image, max_tokens, stop_token, frequency_penalty,
-                                           presence_penalty, repeat_penalty, temperature, top_k, top_p)
+                                       presence_penalty, repeat_penalty, temperature, top_k, top_p)
                 self.temp_prompt = cont
             else:
                 print(f"Den Used Wrong!: {prompt}\n")
@@ -88,9 +183,9 @@ class Den_GPTSampler_llama:
                 composed_prompt = f"{prefix} {prompt} {suffix}"
                 cont = ""
                 stream = model_funct(max_tokens=max_tokens, stop=[stop_token], stream=False,
-                                         frequency_penalty=frequency_penalty, presence_penalty=presence_penalty,
-                                         repeat_penalty=repeat_penalty, temperature=temperature, top_k=top_k,
-                                         top_p=top_p, model=model_path, prompt=composed_prompt)
+                                     frequency_penalty=frequency_penalty, presence_penalty=presence_penalty,
+                                     repeat_penalty=repeat_penalty, temperature=temperature, top_k=top_k,
+                                     top_p=top_p, model=model_path, prompt=composed_prompt)
                 cont = [stream["choices"][0]["text"]]
                 self.temp_prompt = cont
         else:
@@ -110,49 +205,70 @@ class Den_GPTSampler_llama:
 def tensor2pil(image):
     return Image.fromarray(np.clip(255. * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
 
-def llava_inference(model_funct, prompt, images, max_tokens, stop_token, frequency_penalty, presence_penalty,repeat_penalty, temperature, top_k, top_p):
-            list_descriptions = []
-            for image in images:
-                pil_image = tensor2pil(image)
-                # Convert the PIL image to a bytes buffer
-                buffer = BytesIO()
-                pil_image.save(buffer, format="JPEG")  # You can change the format if needed
-                image_bytes = buffer.getvalue()
-                base64_string = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode('utf-8')}"
 
-                response = model_funct.create_chat_completion(max_tokens=max_tokens, stop=[stop_token], stream=False,
-                                                              frequency_penalty=frequency_penalty,
-                                                              presence_penalty=presence_penalty,
-                                                              repeat_penalty=repeat_penalty,
-                                                              temperature=temperature, top_k=top_k, top_p=top_p,
-                                                              messages=[
-                                                                  {"role": "system",
-                                                                   "content": "You are an assistant who perfectly describes images."},
-                                                                  {
-                                                                      "role": "user",
-                                                                      "content": [
-                                                                          {"type": "image_url",
-                                                                           "image_url": {"url": base64_string}},
-                                                                          {"type": "text", "text": prompt}
-                                                                      ]
-                                                                  }
+# Convert PIL to Tensor
+def pil2tensor(image):
+    return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
+
+
+def detect_device():
+    """
+    Detects the appropriate device to run on, and return the device and dtype.
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda"), torch.float16
+    elif torch.backends.mps.is_available():
+        return torch.device("mps"), torch.float16
+    else:
+        return torch.device("cpu"), torch.float32
+
+
+def llava_inference(model_funct, prompt, images, max_tokens, stop_token, frequency_penalty, presence_penalty,
+                    repeat_penalty, temperature, top_k, top_p):
+    list_descriptions = []
+    for image in images:
+        pil_image = tensor2pil(image)
+        # Convert the PIL image to a bytes buffer
+        buffer = BytesIO()
+        pil_image.save(buffer, format="JPEG")  # You can change the format if needed
+        image_bytes = buffer.getvalue()
+        base64_string = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode('utf-8')}"
+
+        response = model_funct.create_chat_completion(max_tokens=max_tokens, stop=[stop_token], stream=False,
+                                                      frequency_penalty=frequency_penalty,
+                                                      presence_penalty=presence_penalty,
+                                                      repeat_penalty=repeat_penalty,
+                                                      temperature=temperature, top_k=top_k, top_p=top_p,
+                                                      messages=[
+                                                          {"role": "system",
+                                                           "content": "You are an assistant who perfectly describes images."},
+                                                          {
+                                                              "role": "user",
+                                                              "content": [
+                                                                  {"type": "image_url",
+                                                                   "image_url": {"url": base64_string}},
+                                                                  {"type": "text", "text": prompt}
                                                               ]
-                                                              )
-                list_descriptions.append(response['choices'][0]['message']['content'])
-            return list_descriptions
+                                                          }
+                                                      ]
+                                                      )
+        list_descriptions.append(response['choices'][0]['message']['content'])
+    return list_descriptions
 
-#SVD from size Image
+
+# SVD from size Image
 class Den_SVD_img2vid:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "clip_vision": ("CLIP_VISION",),
-                              "init_image": ("IMAGE",),
-                              "vae": ("VAE",),
-                              "video_frames": ("INT", {"default": 14, "min": 1, "max": 4096}),
-                              "motion_bucket_id": ("INT", {"default": 127, "min": 1, "max": 1023}),
-                              "fps": ("INT", {"default": 6, "min": 1, "max": 1024}),
-                              "augmentation_level": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.01})
+        return {"required": {"clip_vision": ("CLIP_VISION",),
+                             "init_image": ("IMAGE",),
+                             "vae": ("VAE",),
+                             "video_frames": ("INT", {"default": 14, "min": 1, "max": 4096}),
+                             "motion_bucket_id": ("INT", {"default": 127, "min": 1, "max": 1023}),
+                             "fps": ("INT", {"default": 6, "min": 1, "max": 1024}),
+                             "augmentation_level": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.01})
                              }}
+
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "LATENT")
     RETURN_NAMES = ("positive", "negative", "latent")
 
@@ -165,44 +281,59 @@ class Den_SVD_img2vid:
         width = init_image.shape[2]
         output = clip_vision.encode_image(init_image)
         pooled = output.image_embeds.unsqueeze(0)
-        pixels = comfy.utils.common_upscale(init_image.movedim(-1,1), width, height, "bilinear", "center").movedim(1,-1)
-        encode_pixels = pixels[:,:,:,:3]
+        pixels = comfy.utils.common_upscale(init_image.movedim(-1, 1), width, height, "bilinear", "center").movedim(1,
+                                                                                                                    -1)
+        encode_pixels = pixels[:, :, :, :3]
         if augmentation_level > 0:
             encode_pixels += torch.randn_like(pixels) * augmentation_level
         t = vae.encode(encode_pixels)
-        positive = [[pooled, {"motion_bucket_id": motion_bucket_id, "fps": fps, "augmentation_level": augmentation_level, "concat_latent_image": t}]]
-        negative = [[torch.zeros_like(pooled), {"motion_bucket_id": motion_bucket_id, "fps": fps, "augmentation_level": augmentation_level, "concat_latent_image": torch.zeros_like(t)}]]
+        positive = [[pooled,
+                     {"motion_bucket_id": motion_bucket_id, "fps": fps, "augmentation_level": augmentation_level,
+                      "concat_latent_image": t}]]
+        negative = [[torch.zeros_like(pooled),
+                     {"motion_bucket_id": motion_bucket_id, "fps": fps, "augmentation_level": augmentation_level,
+                      "concat_latent_image": torch.zeros_like(t)}]]
         latent = torch.zeros([video_frames, 4, height // 8, width // 8])
-        return (positive, negative, {"samples":latent})
+        return (positive, negative, {"samples": latent})
 
-#Latent space from size Image
+
+# Latent space from size Image
 class Den_ImageToLatentSpace:
     @classmethod
     def INPUT_TYPES(s):
         return \
-        {"required":
-            {
-            "image": ("IMAGE",),
-            "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096})
+            {"required":
+                {
+                    "image": ("IMAGE",),
+                    "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
+                    "upscale_factor": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 8.0, "step": 0.1})
+                }
             }
-        }
 
     RETURN_TYPES = ("LATENT", "image")
     RETURN_TYPES = ("LATENT", "IMAGE")
     FUNCTION = "generate"
 
     CATEGORY = "latent"
-    def generate(self, image, batch_size=1):
+
+    def generate(self, image, batch_size=1, upscale_factor=1):
+        upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
+        new_image = image.movedim(-1, 1)
+        width = round(new_image.shape[3] * upscale_factor)
+        height = round(new_image.shape[2] * upscale_factor)
+        image2 = comfy.utils.common_upscale(new_image, width, height, upscale_methods[0], "disabled")
+        image = image2.movedim(1, -1)
         height = image.shape[1]
         width = image.shape[2]
-        latent = torch.zeros([batch_size, 4, height // 8, width // 8], device=comfy.model_management.intermediate_device())
-        return ({"samples":latent}, image,)
+        latent = torch.zeros([batch_size, 4, height // 8, width // 8],
+                             device=comfy.model_management.intermediate_device())
+        return ({"samples": latent}, image,)
 
 
 class Den_MaskToImage_AS:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"mask": ("MASK",),}}
+        return {"required": {"mask": ("MASK",), }}
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "convert"
@@ -229,7 +360,7 @@ class Den_MaskToImage_AS:
 class Den_ImageToMask_AS:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"image": ("IMAGE",),}}
+        return {"required": {"image": ("IMAGE",), }}
 
     RETURN_TYPES = ("MASK",)
     FUNCTION = "convert"
@@ -242,11 +373,11 @@ class Den_ImageToMask_AS:
 class Den_LatentMix_AS:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "samples_to": ("LATENT",),
-                              "samples_from": ("LATENT",),
-                              "blend": ("FLOAT", {"default": 0, "min": 0, "max": 100, "step": 1}),
-                            }}
-    
+        return {"required": {"samples_to": ("LATENT",),
+                             "samples_from": ("LATENT",),
+                             "blend": ("FLOAT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+                             }}
+
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "composite"
     CATEGORY = "ASNodes"
@@ -262,10 +393,10 @@ class Den_LatentMix_AS:
 class Den_LatentAdd_AS:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "samples_to": ("LATENT",),
-                              "samples_from": ("LATENT",),
-                            }}
-    
+        return {"required": {"samples_to": ("LATENT",),
+                             "samples_from": ("LATENT",),
+                             }}
+
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "composite"
     CATEGORY = "ASNodes"
@@ -281,18 +412,18 @@ class Den_LatentAdd_AS:
 class Den_SaveLatent_AS:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "latent_in": ("LATENT",), }}
-    
+        return {"required": {"latent_in": ("LATENT",), }}
+
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "doStuff"
     CATEGORY = "ASNodes"
 
     def doStuff(self, latent_in):
         torch.save(latent_in, 'latent.pt')
-        return (latent_in, )
-    
+        return (latent_in,)
 
-# a = torch.load("e:/portables/ComfyUI_windows_portable/latent.pt")   
+
+# a = torch.load("e:/portables/ComfyUI_windows_portable/latent.pt")
 # for idx in range(a['samples'].shape[1]):
 #     plt.figure()
 #     plt.imshow(a['samples'][0,idx,:,:])
@@ -302,21 +433,21 @@ class Den_LoadLatent_AS:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {}}
-    
+
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "doStuff"
     CATEGORY = "ASNodes"
 
-    def doStuff(self,):
+    def doStuff(self, ):
         latent_out = torch.load('latent.pt')
-        return (latent_out, )
-    
+        return (latent_out,)
+
 
 class Den_LatentToImages_AS:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "latent_in": ("LATENT",), }}
-    
+        return {"required": {"latent_in": ("LATENT",), }}
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "doStuff"
     CATEGORY = "ASNodes"
@@ -326,21 +457,21 @@ class Den_LatentToImages_AS:
         s = (s - s.min()) / (s.max() - s.min())
         d1, d2, d3, d4 = s.shape
         images_out = torch.zeros(d2, d3, d4, 3)
-        
+
         for idx in range(s.shape[1]):
             for chan in range(3):
-                images_out[idx,:,:,chan] = s[0,idx,:,:]
-        return (images_out, )
+                images_out[idx, :, :, chan] = s[0, idx, :, :]
+        return (images_out,)
 
 
 class Den_LatentMixMasked_As:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "samples_to": ("LATENT",),
-                              "samples_from": ("LATENT",),
-                              "mask": ("MASK",),
-                              }}
-    
+        return {"required": {"samples_to": ("LATENT",),
+                             "samples_from": ("LATENT",),
+                             "mask": ("MASK",),
+                             }}
+
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "composite"
     CATEGORY = "ASNodes"
@@ -357,21 +488,20 @@ class Den_LatentMixMasked_As:
 class Den_ImageMixMasked_As:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "image_to": ("IMAGE",),
-                              "image_from": ("IMAGE",),
-                              "mask": ("MASK",),
-                              }}
-    
+        return {"required": {"image_to": ("IMAGE",),
+                             "image_from": ("IMAGE",),
+                             "mask": ("MASK",),
+                             }}
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "composite"
     CATEGORY = "ASNodes"
 
     def composite(self, image_to, image_from, mask):
-
-        image_out = image_to.clone()    
-        image_out[0,:,:,0] = image_to[0,:,:,0] * mask + image_from[0,:,:,0] * (1 - mask)
-        image_out[0,:,:,1] = image_to[0,:,:,1] * mask + image_from[0,:,:,1] * (1 - mask)
-        image_out[0,:,:,2] = image_to[0,:,:,2] * mask + image_from[0,:,:,2] * (1 - mask)
+        image_out = image_to.clone()
+        image_out[0, :, :, 0] = image_to[0, :, :, 0] * mask + image_from[0, :, :, 0] * (1 - mask)
+        image_out[0, :, :, 1] = image_to[0, :, :, 1] * mask + image_from[0, :, :, 1] * (1 - mask)
+        image_out[0, :, :, 2] = image_to[0, :, :, 2] * mask + image_from[0, :, :, 2] * (1 - mask)
         return (image_out,)
 
 
@@ -383,7 +513,7 @@ class Den_TextToImage_AS:
         return {
             "required": {
                 "text": ("STRING", {"multiline": True}),
-                "font": (fonts, ),
+                "font": (fonts,),
                 "size": ("INT", {"default": 20, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
                 "width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
                 "height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
@@ -395,9 +525,8 @@ class Den_TextToImage_AS:
     CATEGORY = "ASNodes"
 
     def doStuff(self, text, font, size, width, height):
-        
         PIL_image = Image.new("RGB", (width, height), (0, 0, 0))
-        
+
         draw = ImageDraw.Draw(PIL_image)
 
         # Set the font and size
@@ -411,7 +540,7 @@ class Den_TextToImage_AS:
         y = (PIL_image.height - text_size[1]) / 2
 
         # Draw the text on the image
-        draw.text((x, y), text, font=font, fill=(255,255,255))
+        draw.text((x, y), text, font=font, fill=(255, 255, 255))
 
         np_image = np.array(PIL_image)
 
@@ -419,8 +548,8 @@ class Den_TextToImage_AS:
             (1, height, width, 3),
             dtype=torch.float32,
         )
-        new_image[0,:,:,:] = torch.from_numpy(np_image) / 256
-        
+        new_image[0, :, :, :] = torch.from_numpy(np_image) / 256
+
         return (new_image,)
 
 
@@ -442,7 +571,7 @@ class Den_BatchIndex_AS:
 
     def doStuff(self, batch_index):
         return (batch_index,)
-    
+
 
 class Den_MapRange_AS:
     @classmethod
@@ -454,7 +583,7 @@ class Den_MapRange_AS:
                 "in_1": ("FLOAT", {"default": 1, "min": -sys.float_info.max, "max": sys.float_info.max, "step": 0.01}),
                 "out_0": ("FLOAT", {"default": 0, "min": -sys.float_info.max, "max": sys.float_info.max, "step": 0.01}),
                 "out_1": ("FLOAT", {"default": 1, "min": -sys.float_info.max, "max": sys.float_info.max, "step": 0.01}),
-                
+
             },
         }
 
@@ -465,7 +594,7 @@ class Den_MapRange_AS:
     def mapRange(self, value, in_0, in_1, out_0, out_1):
         if (in_0 == in_1):
             raise ValueError("MapRange_AS: in_0 and in_1 are equal")
-        
+
         run_param = (value - in_0) / (in_1 - in_0)
         result = out_0 + run_param * (out_1 - out_0)
         return (result, round(result))
@@ -476,7 +605,7 @@ class Den_Number2Float_AS:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "value": ("number", { }),
+                "value": ("number", {}),
             },
         }
 
@@ -485,7 +614,7 @@ class Den_Number2Float_AS:
     CATEGORY = "ASNodes"
 
     def convert(self, value):
-        return (value, )
+        return (value,)
 
 
 class Den_Int2Any_AS:
@@ -502,7 +631,7 @@ class Den_Int2Any_AS:
     CATEGORY = "ASNodes"
 
     def convert(self, value):
-        return (value, )
+        return (value,)
 
 
 class Den_Number2Int_AS:
@@ -510,7 +639,7 @@ class Den_Number2Int_AS:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "value": ("number", { }),
+                "value": ("number", {}),
             },
         }
 
@@ -519,7 +648,7 @@ class Den_Number2Int_AS:
     CATEGORY = "ASNodes"
 
     def convert(self, value):
-        return (round(value), )
+        return (round(value),)
 
 
 class Den_Eval_AS:
@@ -527,22 +656,22 @@ class Den_Eval_AS:
     def INPUT_TYPES(cls):
         return {
             "optional": {
-                "i1": ("INT", { "default": 0, "step": 1 }),
-                "i2": ("INT", { "default": 0, "step": 1 }),
-                "f1": ("FLOAT", { "default": 0.0, "step": 0.1, "round": 0.01 }),
-                "f2": ("FLOAT", { "default": 0.0, "step": 0.1, "round": 0.01 }),
-                "s1": ("STRING", { "multiline": True, "default": "" }),
-                "s2": ("STRING", { "multiline": True, "default": "" }),
+                "i1": ("INT", {"default": 0, "step": 1}),
+                "i2": ("INT", {"default": 0, "step": 1}),
+                "f1": ("FLOAT", {"default": 0.0, "step": 0.1, "round": 0.01}),
+                "f2": ("FLOAT", {"default": 0.0, "step": 0.1, "round": 0.01}),
+                "s1": ("STRING", {"multiline": True, "default": ""}),
+                "s2": ("STRING", {"multiline": True, "default": ""}),
             },
             "required": {
-                "int_prc": ("STRING", { "multiline": False, "default": "0" }),
-                "float_prc": ("STRING", { "multiline": False, "default": "0" }),
-                "str_prc": ("STRING", { "multiline": False, "default": "0" }),
+                "int_prc": ("STRING", {"multiline": False, "default": "0"}),
+                "float_prc": ("STRING", {"multiline": False, "default": "0"}),
+                "str_prc": ("STRING", {"multiline": False, "default": "0"}),
             },
 
         }
 
-    RETURN_TYPES = ("INT","FLOAT","STRING",)
+    RETURN_TYPES = ("INT", "FLOAT", "STRING",)
     FUNCTION = "do_stuff"
     CATEGORY = "ASNodes"
 
@@ -550,8 +679,8 @@ class Den_Eval_AS:
         int_out = eval(int_prc)
         float_out = eval(float_prc)
         str_out = eval(str_prc)
-        
-        return (int_out, float_out, str_out )
+
+        return (int_out, float_out, str_out)
 
 
 class Den_Number_AS:
@@ -568,17 +697,17 @@ class Den_Number_AS:
     CATEGORY = "ASNodes"
 
     def doStuff(self, value):
-        return (value, )
-    
+        return (value,)
+
 
 class Den_Math_AS:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "do": (["add", "subtract", "multiply", "divide", "power"], ),
-                "in_0": ("FLOAT", {"default": 0, "step": 0.01, "round": 0.01,}),
-                "in_1": ("FLOAT", {"default": 0, "step": 0.01, "round": 0.01,}),
+                "do": (["add", "subtract", "multiply", "divide", "power"],),
+                "in_0": ("FLOAT", {"default": 0, "step": 0.01, "round": 0.01, }),
+                "in_1": ("FLOAT", {"default": 0, "step": 0.01, "round": 0.01, }),
             },
         }
 
@@ -587,26 +716,26 @@ class Den_Math_AS:
     CATEGORY = "ASNodes"
 
     def calculate(self, do, in_0, in_1):
-        if do=="add":
+        if do == "add":
             result = in_0 + in_1
-        if do=="subtract":
+        if do == "subtract":
             result = in_0 - in_1
-        if do=="multiply":
+        if do == "multiply":
             result = in_0 * in_1
-        if do=="divide":
+        if do == "divide":
             result = in_0 / in_1
-        if do=="power":
+        if do == "power":
             result = in_0 ** in_1
 
-        return (result, round(result) )
-    
+        return (result, round(result))
+
 
 class Den_Increment_AS:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "value": ("INT", {"default": 10, "min": 0, "max": 20, "step":3}),
+                "value": ("INT", {"default": 10, "min": 0, "max": 20, "step": 3}),
             },
         }
 
@@ -615,38 +744,38 @@ class Den_Increment_AS:
     CATEGORY = "ASNodes"
 
     def doStuff(self, value):
-        return (value, )
+        return (value,)
 
 
 class Den_CropImage_AS:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "image": ("IMAGE",),
+        return {"required": {"image": ("IMAGE",),
                              "width": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION}),
                              "height": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION}),
                              "x": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION}),
                              "y": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION}),
-                         }}
-    
+                             }}
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "process"
     CATEGORY = "ASNodes"
 
     def process(self, image, width, height, x, y):
-
-        image_out = image.clone()   
-        print(image.shape) 
-        image_out = image_out[:, y:y+height, x:x+width]
+        image_out = image.clone()
+        print(image.shape)
+        image_out = image_out[:, y:y + height, x:x + width]
         return (image_out,)
-    
+
 
 class Den_TextWildcardList_AS:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"text": ("STRING", {"default": "$list", "multiline": True}), 
-                             "strings": ("STRING", {"multiline": True}), 
+        return {"required": {"text": ("STRING", {"default": "$list", "multiline": True}),
+                             "strings": ("STRING", {"multiline": True}),
                              "idx": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                              }}
+
     RETURN_TYPES = ("STRING",)
     FUNCTION = "encode"
 
@@ -655,8 +784,8 @@ class Den_TextWildcardList_AS:
     def encode(self, text, strings, idx):
         string_list = strings.split(",")
         wildcard = string_list[idx % len(string_list)].strip()
-        return (text.replace("$list", wildcard), )
-    
+        return (text.replace("$list", wildcard),)
+
 
 class Den_NoiseImage_AS:
     @classmethod
@@ -678,15 +807,15 @@ class Den_NoiseImage_AS:
             (1, height, width, 3),
             dtype=torch.float32,
         )
-        
-        return (new_image,)
 
-    
+        return (new_image,)
 
 
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
 NODE_CLASS_MAPPINGS = {
+    "Den_GPTLoaderSimple_llama": Den_GPTLoaderSimple_llama,
+    "Den_GPTSampler_llama": Den_GPTSampler_llama,
     "Den_SVD_img2vid": Den_SVD_img2vid,
     "Den_ImageToLatentSpace": Den_ImageToLatentSpace,
     "Den_MaskToImage_AS": Den_MaskToImage_AS,
