@@ -2,10 +2,144 @@ import torch
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import sys, os
-import comfy.model_management
-
+#Latent
+import comfy.model_management #CUDA detect
+#LLM
+from io import BytesIO
+import base64
 
 MAX_RESOLUTION = 8192
+#LLM Special Load
+class Den_GPTSampler_llama:
+    """
+    A custom node by Den for text generation using GPT
+
+    Attributes
+    ----------
+    max_tokens (`int`): Maximum number of tokens in the generated text.
+    temperature (`float`): Temperature parameter for controlling randomness (0.2 to 1.0).
+    top_p (`float`): Top-p probability for nucleus sampling.
+    logprobs (`int`|`None`): Number of log probabilities to output alongside the generated text.
+    echo (`bool`): Whether to print the input prompt alongside the generated text.
+    stop (`str`|`List[str]`|`None`): Tokens at which to stop generation.
+    frequency_penalty (`float`): Frequency penalty for word repetition.
+    presence_penalty (`float`): Presence penalty for word diversity.
+    repeat_penalty (`float`): Penalty for repeating a prompt's output.
+    top_k (`int`): Top-k tokens to consider during generation.
+    stream (`bool`): Whether to generate the text in a streaming fashion.
+    tfs_z (`float`): Temperature scaling factor for top frequent samples.
+    model (`str`): The GPT model to use for text generation.
+    """
+
+    def __init__(self):
+        self.temp_prompt = ""
+        pass
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+
+                "model": ("CUSTOM", {"default": ""}),
+                "max_tokens": ("INT", {"default": 2048}),
+                "temperature": ("FLOAT", {"default": 0.7, "min": 0.2, "max": 1.0}),
+                "top_p": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 1.0}),
+                "logprobs": ("INT", {"default": 0}),
+                "echo": (["enable", "disable"], {"default": "disable"}),
+                "stop_token": ("STRING", {"default": "STOPTOKEN"}),
+                "frequency_penalty": ("FLOAT", {"default": 0.0}),
+                "presence_penalty": ("FLOAT", {"default": 0.0}),
+                "repeat_penalty": ("FLOAT", {"default": 1.17647}),
+                "top_k": ("INT", {"default": 40}),
+                "tfs_z": ("FLOAT", {"default": 1.0}),
+                "print_output": (["enable", "disable"], {"default": "disable"}),
+                "cached": (["YES", "NO"], {"default": "NO"}),
+                "prefix": ("STRING", {"default": "### Instruction: "}),
+                "suffix": ("STRING", {"default": "### Response: "}),
+                "max_tags": ("INT", {"default": 50}),
+
+            },
+            "optional": {
+                "prompt": ("STRING", {"forceInput": True}),
+                "image": ("IMAGE",),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "generate_text"
+    CATEGORY = "N-Suite/Sampling"
+
+    def generate_text(self, max_tokens, temperature, top_p, logprobs, echo, stop_token, frequency_penalty,
+                      presence_penalty, repeat_penalty, top_k, tfs_z, model, print_output, cached, prefix, suffix,
+                      max_tags, image=None, prompt=None):
+        model_funct = model[0]
+        model_name = model[1]
+        model_path = model[2]
+
+        if cached == "NO":
+            if "llava" in model_path:
+                print(f"Den Used Llama Model!: {prompt}\n")
+                cont = llava_inference(model_funct, prompt, image, max_tokens, stop_token, frequency_penalty,
+                                           presence_penalty, repeat_penalty, temperature, top_k, top_p)
+                self.temp_prompt = cont
+            else:
+                print(f"Den Used Wrong!: {prompt}\n")
+                # Call your GPT generation function here using the provided parameters
+                composed_prompt = f"{prefix} {prompt} {suffix}"
+                cont = ""
+                stream = model_funct(max_tokens=max_tokens, stop=[stop_token], stream=False,
+                                         frequency_penalty=frequency_penalty, presence_penalty=presence_penalty,
+                                         repeat_penalty=repeat_penalty, temperature=temperature, top_k=top_k,
+                                         top_p=top_p, model=model_path, prompt=composed_prompt)
+                cont = [stream["choices"][0]["text"]]
+                self.temp_prompt = cont
+        else:
+            cont = self.temp_prompt
+            # remove fist 30 characters of cont
+        try:
+            if print_output == "enable":
+                print(f"Input: {prompt}\nGenerated Text: {cont}")
+            return {"ui": {"text": cont}, "result": (cont,)}
+
+        except:
+            if print_output == "enable":
+                print(f"Input: {prompt}\nGenerated Text: ")
+            return {"ui": {"text": " "}, "result": (" ",)}
+
+
+def tensor2pil(image):
+    return Image.fromarray(np.clip(255. * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
+
+def llava_inference(model_funct, prompt, images, max_tokens, stop_token, frequency_penalty, presence_penalty,repeat_penalty, temperature, top_k, top_p):
+            list_descriptions = []
+            for image in images:
+                pil_image = tensor2pil(image)
+                # Convert the PIL image to a bytes buffer
+                buffer = BytesIO()
+                pil_image.save(buffer, format="JPEG")  # You can change the format if needed
+                image_bytes = buffer.getvalue()
+                base64_string = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode('utf-8')}"
+
+                response = model_funct.create_chat_completion(max_tokens=max_tokens, stop=[stop_token], stream=False,
+                                                              frequency_penalty=frequency_penalty,
+                                                              presence_penalty=presence_penalty,
+                                                              repeat_penalty=repeat_penalty,
+                                                              temperature=temperature, top_k=top_k, top_p=top_p,
+                                                              messages=[
+                                                                  {"role": "system",
+                                                                   "content": "You are an assistant who perfectly describes images."},
+                                                                  {
+                                                                      "role": "user",
+                                                                      "content": [
+                                                                          {"type": "image_url",
+                                                                           "image_url": {"url": base64_string}},
+                                                                          {"type": "text", "text": prompt}
+                                                                      ]
+                                                                  }
+                                                              ]
+                                                              )
+                list_descriptions.append(response['choices'][0]['message']['content'])
+            return list_descriptions
 
 #SVD from size Image
 class Den_SVD_img2vid:

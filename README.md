@@ -4,6 +4,17 @@ Custom nodes make easy Advanced Workflows.
 Focus on Image\Video and ControlNet efficiency and performances.
 Manipulation of Latent Space, Automatic pipeline with a bit efforts.
 --------------
+#### Using GPT & LLM models : Llava,GGUF
+https://huggingface.co/models?library=gguf&sort=trending&search=llava
+
+#### GPT: `Den_GPTSampler_llama`
+- Sampler Llama with using Cache for Acceleration
+
+![](ba951e180cc4c9304541abe2843c28ce.png)
+
+- Example Workflow GPT-SD
+![](6da778c85399f187e2829a3e460b2938.jpg)
+
 #### SD Video: `Den_SVD_img2vid`
 
 - SVD from size Image for init Latent Space SVD Model
