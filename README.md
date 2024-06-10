@@ -9,7 +9,6 @@ New Nodes in pack Den Workflow ComfyUI
 #### GPT Sampler: `Den_GPTSampler_llama`
 #### GPT load: `Den_GPTLoaderSimple_llama`
 #### SD Video: `Den_SVD_img2vid`
-#### ImageToLatent node: `Den_ImageToLatentSpace`
 #### FaceRestore Model codeformer: `Den_FaceRestoreCFWithModel`
 --------------
 #### Using GPT & LLM models : Llava,GGUF
@@ -44,6 +43,7 @@ https://huggingface.co/models?library=gguf&sort=trending&search=llava
 ![](d88f68c317f3f790055be5978e2689dc.png)
 
 - FaceRestore With Model Gan or CodeFormer
+
 ![](b64810ce1266a038ccd532aa9389c996.png)
 --------------
 ![ComfyUI Screenshot](e92381a5d7c26f138d1451c8b4f52142.jpg)
