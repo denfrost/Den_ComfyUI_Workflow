@@ -14,6 +14,14 @@ New Nodes in pack Den Workflow ComfyUI
 #### Using GPT & LLM models : Llava,GGUF
 https://huggingface.co/models?library=gguf&sort=trending&search=llava
 
+#### can put models to path comfyui
+**ComfyUI\models\GPTcheckpoints\llava**
+
+have 2 folders for Clip and Model gguf
+
+**ComfyUI\models\GPTcheckpoints\llava\clips**
+**ComfyUI\models\GPTcheckpoints\llava\models**
+
 #### GPT load: `Den_GPTLoaderSimple_llama`
 - Load Model and Clip for LLM
 
