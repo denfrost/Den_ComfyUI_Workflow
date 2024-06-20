@@ -17,9 +17,10 @@ https://huggingface.co/models?library=gguf&sort=trending&search=llava
 #### can put models to path comfyui
 **ComfyUI\models\GPTcheckpoints\llava**
 
-have 2 folders for Clip and Model gguf
+Have 2 folders for Clip and Model gguf or must create this folders and put new models
 
 **ComfyUI\models\GPTcheckpoints\llava\clips**
+
 **ComfyUI\models\GPTcheckpoints\llava\models**
 
 #### GPT load: `Den_GPTLoaderSimple_llama`
