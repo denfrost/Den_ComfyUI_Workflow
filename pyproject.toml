@@ -1,0 +1,14 @@
+[project]
+name = "den_comfyui_workflow"
+description = "Custom nodes make easy Advanced Workflows. Focus on Image/Video and ControlNet efficiency and performances. Manipulation of Latent Space, Automatic pipeline with a bit efforts."
+version = "1.0.0"
+license = "LICENSE"
+
+[project.urls]
+Repository = "https://github.com/denfrost/Den_ComfyUI_Workflow"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "Den_ComfyUI_Workflow"
+Icon = ""
